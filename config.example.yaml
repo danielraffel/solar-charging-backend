@@ -1,0 +1,22 @@
+# Solar Charging Backend Configuration
+# Copy this file to config.yaml and update with your settings
+
+mqtt:
+  host: "192.168.1.100"           # MQTT broker IP address
+  port: 1883                       # MQTT broker port
+  username: "solar"                # MQTT username
+  password: "your-password-here"   # MQTT password
+  dongle_prefix: "dongle-XX:XX:XX:XX:XX:XX"  # Your dongle's MQTT topic prefix
+
+server:
+  host: "0.0.0.0"                  # Server bind address (0.0.0.0 = all interfaces)
+  port: 8088                        # HTTP server port
+
+charging:
+  safety_cutoff_hours: 8           # Maximum charging duration (hours)
+  soc_check_interval: 30           # Seconds between SOC checks
+  retry_on_failure: true           # Retry MQTT publish on failure
+  max_retries: 3                   # Maximum retry attempts
+
+logging:
+  level: "INFO"                    # Log level: DEBUG, INFO, WARNING, ERROR
