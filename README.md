@@ -286,6 +286,97 @@ Then:
 launchctl load ~/Library/LaunchAgents/com.solar.charging-backend.plist
 ```
 
+## 🐧 Running on Linux (Auto-Start on Reboot)
+
+For production deployments on Linux servers (Ubuntu, Debian, etc.), you have two options to ensure the backend starts automatically on reboot.
+
+### Option 1: Using Crontab (Simple)
+
+1. Edit your crontab:
+```bash
+crontab -e
+```
+
+2. Add this line:
+```bash
+@reboot cd /opt/solar-charging-backend && /usr/bin/docker compose up -d
+```
+
+3. Save and verify:
+```bash
+crontab -l
+```
+
+### Option 2: Using systemd (Recommended for Production)
+
+Create a systemd service for better process management and logging:
+
+1. Create service file:
+```bash
+sudo nano /etc/systemd/system/solar-charging-backend.service
+```
+
+2. Add this content:
+```ini
+[Unit]
+Description=Solar Charging Backend
+Requires=docker.service
+After=docker.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+WorkingDirectory=/opt/solar-charging-backend
+ExecStart=/usr/bin/docker compose up -d
+ExecStop=/usr/bin/docker compose down
+User=root
+Group=root
+
+[Install]
+WantedBy=multi-user.target
+```
+
+3. Enable and start:
+```bash
+sudo systemctl daemon-reload
+sudo systemctl enable solar-charging-backend
+sudo systemctl start solar-charging-backend
+```
+
+4. Check status:
+```bash
+sudo systemctl status solar-charging-backend
+```
+
+### Verify Auto-Start
+
+After server reboot:
+```bash
+docker ps | grep solar-charging-backend
+```
+
+Expected output:
+```
+CONTAINER ID   IMAGE                              STATUS
+abc123def456   solar-charging-backend_backend     Up 2 minutes
+```
+
+### Manual Service Control
+
+```bash
+# Start
+cd /opt/solar-charging-backend && docker compose up -d
+
+# Stop
+cd /opt/solar-charging-backend && docker compose down
+
+# Restart
+cd /opt/solar-charging-backend && docker compose restart
+
+# View logs
+cd /opt/solar-charging-backend && docker compose logs -f
+```
+
 ## 🐛 Troubleshooting
 
 ### "Failed to connect to MQTT"
