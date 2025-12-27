@@ -180,7 +180,7 @@ async def root():
         "name": "Solar Charging Backend",
         "version": "1.0.0",
         "status": "running",
-        "mqtt_connected": app_state.mqtt.is_connected() if app_state.mqtt else False,
+        "mqtt_connected": app_state.mqtt.connected if app_state.mqtt else False,
         "charging": {
             "is_charging": is_charging,
             "current_soc": current_soc,
