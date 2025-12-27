@@ -159,12 +159,40 @@ app.include_router(charge_router, prefix="/api", tags=["charging"])
 
 @app.get("/")
 async def root():
-    """Root endpoint."""
+    """Root endpoint with status dashboard."""
+    # Get current charging status
+    is_charging = app_state.scheduler.is_charging if app_state.scheduler else False
+    current_soc = app_state.mqtt.current_soc if app_state.mqtt else None
+
+    # Get current schedule info
+    schedule = app_state.scheduler.current_schedule if app_state.scheduler else None
+    schedule_info = None
+    if schedule:
+        schedule_info = {
+            "enabled": schedule.enabled,
+            "target_soc": schedule.target_soc,
+            "start_time": schedule.start_time,
+            "mode": schedule.mode,
+            "next_run": schedule.next_run.isoformat() if schedule.next_run else None,
+        }
+
     return {
         "name": "Solar Charging Backend",
         "version": "1.0.0",
         "status": "running",
-        "docs": "/docs"
+        "mqtt_connected": app_state.mqtt.is_connected() if app_state.mqtt else False,
+        "charging": {
+            "is_charging": is_charging,
+            "current_soc": current_soc,
+            "started_at": app_state.scheduler.charge_started_at.isoformat() if (app_state.scheduler and app_state.scheduler.charge_started_at) else None,
+        },
+        "schedule": schedule_info,
+        "docs": "/docs",
+        "api_endpoints": {
+            "health": "/api/health",
+            "status": "/api/charge/status",
+            "schedule": "/api/charge/schedule"
+        }
     }
 
 
