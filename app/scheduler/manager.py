@@ -1,11 +1,13 @@
 """Charging schedule manager with APScheduler."""
 
 import logging
+import re
 from datetime import datetime, timedelta
 from typing import Optional
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.date import DateTrigger
 import asyncio
+from dateutil import parser as dateutil_parser
 
 from ..models import ScheduleData, ChargingConfig
 from ..mqtt import MQTTClient
@@ -85,7 +87,31 @@ class ChargingScheduleManager:
         self.current_schedule = None
 
     def _calculate_next_run(self, start_time: str) -> datetime:
-        """Calculate the next occurrence of start_time."""
+        """Calculate the next occurrence of start_time.
+
+        Supports two formats:
+        - HH:MM (legacy): Calculates next occurrence in local time
+        - ISO 8601 with timezone: Uses provided datetime directly
+        """
+        # Check if it's ISO 8601 format with timezone
+        if not re.match(r"^([01]\d|2[0-3]):([0-5]\d)$", start_time):
+            # Parse ISO 8601 datetime with timezone
+            try:
+                dt = dateutil_parser.parse(start_time)
+                logger.info(f"Using timezone-aware datetime: {dt} ({dt.tzinfo})")
+
+                # Convert to local time for APScheduler
+                local_dt = dt.astimezone()
+
+                # If the time has already passed, return it anyway (for one-time schedules)
+                # APScheduler will execute immediately if run_date is in the past
+                return local_dt
+
+            except Exception as e:
+                logger.error(f"Failed to parse ISO 8601 datetime '{start_time}': {e}")
+                # Fall back to HH:MM parsing
+
+        # Legacy HH:MM format - calculate next occurrence
         now = datetime.now()
         hour, minute = map(int, start_time.split(":"))
 
@@ -140,40 +166,79 @@ class ChargingScheduleManager:
         logger.info(f"Safety cutoff scheduled for {cutoff_time}")
 
     async def _start_charging(self, schedule: ScheduleData) -> bool:
-        """Start charging by publishing to MQTT."""
-        try:
-            # Calculate end time (start + safety cutoff hours)
-            hour, minute = map(int, schedule.start_time.split(":"))
-            end_hour = (hour + self.config.safety_cutoff_hours) % 24
-            end_time = f"{end_hour:02d}:{minute:02d}"
+        """Start charging by publishing to MQTT.
 
+        CRITICAL: Publishes BOTH time window AND SOC limit (hybrid approach).
+        Time window is REQUIRED for inverter to start charging (tested and verified).
+        - Time window: Tells inverter WHEN to charge (start time → start + 8 hours)
+        - SOC limit: Backend monitors and stops when target reached
+        """
+        try:
             # Publish settings to dongle
             logger.info("Publishing charging settings to dongle...")
 
-            # 1. Enable AC charging
+            # 1. Enable AC charging (holdbank1)
             if not self.mqtt.publish_ac_charge_enable():
+                logger.error("Failed to enable AC charging")
                 return False
 
             await asyncio.sleep(0.5)  # Brief delay between publishes
 
-            # 2. Set time window
-            if not self.mqtt.publish_time_settings(schedule.start_time, end_time):
+            # 2. Set time window (start time → start + 8 hours safety cutoff)
+            # Extract time from schedule.start_time (supports both HH:MM and ISO 8601)
+            start_time_str = self._extract_time_string(schedule.start_time)
+            end_time_str = self._calculate_end_time(start_time_str, self.config.safety_cutoff_hours)
+
+            logger.info(f"Setting time window: {start_time_str} → {end_time_str}")
+            if not self.mqtt.publish_time_settings(start_time_str, end_time_str):
+                logger.error("Failed to publish time window")
                 return False
 
-            await asyncio.sleep(0.5)
+            await asyncio.sleep(0.5)  # Brief delay between publishes
 
-            # 3. Set SOC limit
+            # 3. Set ACChgMode=4 (Time+SOC mode) so inverter honors SOC limit
+            if not self.mqtt.publish_ac_charge_mode(4):
+                logger.error("Failed to set ACChgMode")
+                return False
+
+            await asyncio.sleep(0.5)  # Brief delay between publishes
+
+            # 4. Set SOC limit (target percentage)
             if not self.mqtt.publish_soc_limit(schedule.target_soc):
+                logger.error("Failed to set SOC limit")
                 return False
 
             self.is_charging = True
             self.charge_started_at = datetime.now()
-            logger.info("Charging started successfully")
+            logger.info(f"✅ Charging started successfully")
+            logger.info(f"   Time window: {start_time_str} → {end_time_str} (safety cutoff)")
+            logger.info(f"   Target SOC: {schedule.target_soc}%")
+            logger.info(f"   Backend will monitor and stop when SOC target reached")
             return True
 
         except Exception as e:
             logger.error(f"Error starting charge: {e}")
             return False
+
+    def _extract_time_string(self, start_time: str) -> str:
+        """Extract HH:MM time string from either HH:MM or ISO 8601 format."""
+        # Check if it's ISO 8601 format with timezone
+        if not re.match(r"^([01]\d|2[0-3]):([0-5]\d)$", start_time):
+            # Parse ISO 8601 datetime
+            try:
+                dt = dateutil_parser.parse(start_time)
+                return dt.strftime("%H:%M")
+            except Exception as e:
+                logger.error(f"Failed to parse datetime '{start_time}': {e}")
+                # Fall back to HH:MM parsing or use current time
+                return datetime.now().strftime("%H:%M")
+        return start_time
+
+    def _calculate_end_time(self, start_time: str, hours_offset: int) -> str:
+        """Calculate end time as start time + hours_offset."""
+        hour, minute = map(int, start_time.split(":"))
+        end_hour = (hour + hours_offset) % 24
+        return f"{end_hour:02d}:{minute:02d}"
 
     async def _stop_charging(self):
         """Stop charging by disabling AC charge."""
@@ -209,9 +274,13 @@ class ChargingScheduleManager:
                     logger.info(f"Target SOC reached ({current_soc}% >= {schedule.target_soc}%)")
                     await self._stop_charging()
 
-                    # Reschedule if recurring
+                    # Handle completion based on mode
                     if schedule.mode == "recurring" and self.current_schedule:
+                        logger.info("Recurring mode - rescheduling for next day")
                         self._reschedule_recurring(self.current_schedule)
+                    elif schedule.mode == "once":
+                        logger.info("One-time mode - clearing schedule")
+                        self._clear_one_time_schedule()
 
                     break
 
@@ -230,9 +299,14 @@ class ChargingScheduleManager:
         logger.warning(f"Safety cutoff triggered after {self.config.safety_cutoff_hours} hours")
         await self._stop_charging()
 
-        # Reschedule if recurring
-        if self.current_schedule and self.current_schedule.mode == "recurring":
-            self._reschedule_recurring(self.current_schedule)
+        # Handle completion based on mode
+        if self.current_schedule:
+            if self.current_schedule.mode == "recurring":
+                logger.info("Recurring mode - rescheduling for next day after safety cutoff")
+                self._reschedule_recurring(self.current_schedule)
+            elif self.current_schedule.mode == "once":
+                logger.info("One-time mode - clearing schedule after safety cutoff")
+                self._clear_one_time_schedule()
 
     def _reschedule_recurring(self, schedule: ScheduleData):
         """Reschedule a recurring charge for the next day."""
@@ -252,3 +326,16 @@ class ChargingScheduleManager:
         )
 
         logger.info(f"Rescheduled recurring charge for {next_run}")
+
+    def _clear_one_time_schedule(self):
+        """Clear one-time schedule after completion."""
+        logger.info("Clearing one-time schedule")
+
+        # Cancel any pending scheduled job
+        if self.scheduler.get_job("charge_job"):
+            self.scheduler.remove_job("charge_job")
+            logger.info("Removed scheduled charge job")
+
+        # Clear current schedule
+        self.current_schedule = None
+        logger.info("One-time schedule cleared - ready for new schedule")

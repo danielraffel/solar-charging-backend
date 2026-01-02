@@ -95,7 +95,7 @@ class MQTTClient:
 
             # Subscribe to inputbank1 for power data
             inputbank_topic = f"{self.config.dongle_prefix}/inputbank1"
-            client.subscribe(inputbank_topic)
+            client.subscribe(inputbank_topic, qos=0)
             logger.info(f"Subscribed to {inputbank_topic}")
 
             # Subscribe to response topic for command confirmations
@@ -114,6 +114,7 @@ class MQTTClient:
             logger.info("Disconnected from MQTT broker")
 
     def _on_message(self, client, userdata, msg):
+        logger.info(f"📩 Received MQTT message on topic: {msg.topic}")
         """Callback when message received from MQTT."""
         topic = msg.topic
 
@@ -122,7 +123,7 @@ class MQTTClient:
             if topic.endswith("/inputbank1"):
                 payload = json.loads(msg.payload.decode())
 
-                if "Serialnumber" in payload and "payload" in payload:
+                if "serialnumber" in payload and "payload" in payload:
                     data = payload["payload"]
 
                     # Extract SOC
@@ -284,3 +285,38 @@ class MQTTClient:
     def set_soc_callback(self, callback: Callable[[int], None]):
         """Set callback function to be called when SOC is updated."""
         self.soc_callback = callback
+
+    def publish_ac_charge_mode(self, mode: int = 4) -> bool:
+        """Publish ACChgMode setting.
+        
+        Mode values:
+        - 0: Time only (honors time window only)
+        - 1: VOLT (voltage-based only)
+        - 2: SOC (SOC-based only)
+        - 3: Time + VOLT (time window AND voltage limit)
+        - 4: Time + SOC (time window AND SOC limit) - DEFAULT
+        
+        Without ACChgMode=4, the inverter ignores ACChgSOCLimit entirely.
+        """
+        if not self.connected:
+            logger.error("Cannot publish - not connected to MQTT")
+            return False
+
+        topic = f"{self.config.dongle_prefix}/update"
+        payload = {
+            "setting": "ACChgMode",
+            "value": str(mode),
+            "from": "SolarBackend"
+        }
+
+        try:
+            result = self.client.publish(topic, json.dumps(payload))
+            if result.rc == mqtt.MQTT_ERR_SUCCESS:
+                logger.info(f"Published ACChgMode={mode} (Time+SOC mode)")
+                return True
+            else:
+                logger.error(f"Failed to publish ACChgMode: {result.rc}")
+                return False
+        except Exception as e:
+            logger.error(f"Error publishing ACChgMode: {e}")
+            return False
