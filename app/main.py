@@ -17,6 +17,7 @@ from .mqtt import MQTTClient
 from .scheduler import ChargingScheduleManager
 from .api import health_router, charge_router, device_router
 from .notifications import APNsService
+from .evcc import EVCCMonitorService
 
 
 # Configure logging
@@ -43,6 +44,7 @@ class AppState:
         self.mqtt: Optional[MQTTClient] = None
         self.scheduler: Optional[ChargingScheduleManager] = None
         self.apns: Optional[APNsService] = None
+        self.evcc_monitor: Optional[EVCCMonitorService] = None
         self.data_dir = Path("data")
         self.schedule_file = self.data_dir / "schedule.json"
 
@@ -138,12 +140,27 @@ async def lifespan(app: FastAPI):
     else:
         logger.info("APNs service disabled in configuration")
 
+    # Initialize EVCC monitor for EV charging notifications
+    if app_state.config.evcc.enabled:
+        app_state.evcc_monitor = EVCCMonitorService(
+            evcc_url=app_state.config.evcc.url,
+            loadpoint_id=app_state.config.evcc.loadpoint_id,
+            poll_interval=app_state.config.evcc.poll_interval_seconds,
+            apns_service=app_state.apns if app_state.apns and app_state.apns.is_enabled else None
+        )
+        await app_state.evcc_monitor.start()
+        logger.info(f"EVCC monitor started: {app_state.config.evcc.url} (loadpoint {app_state.config.evcc.loadpoint_id})")
+    else:
+        logger.info("EVCC monitoring disabled in configuration")
+
     logger.info("Solar Charging Backend started successfully")
 
     yield
 
     # Shutdown
     logger.info("Shutting down Solar Charging Backend...")
+    if app_state.evcc_monitor:
+        await app_state.evcc_monitor.stop()
     app_state.scheduler.stop()
     app_state.mqtt.disconnect()
     logger.info("Shutdown complete")

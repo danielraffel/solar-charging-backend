@@ -53,6 +53,33 @@ class APNsConfig(BaseModel):
     use_sandbox: bool = Field(False, description="Use APNs sandbox for development")
 
 
+class EVCCNotificationsConfig(BaseModel):
+    """EVCC notification type toggles."""
+    enabled: bool = Field(True, description="Enable all EVCC notifications")
+    plan_activated: bool = Field(True, description="One-time plan activated")
+    plan_charging_started: bool = Field(True, description="Plan charging begins")
+    plan_charging_updates: bool = Field(True, description="Periodic updates during plan")
+    plan_complete: bool = Field(True, description="Plan charging finished")
+    mode_changed: bool = Field(True, description="Any mode change")
+    fast_charging_started: bool = Field(True, description="Fast mode starts")
+    fast_charging_stopped: bool = Field(True, description="Fast mode ends")
+    solar_charging_started: bool = Field(True, description="Solar charging starts")
+    solar_charging_stopped: bool = Field(True, description="Solar charging ends")
+    minsolar_charging_started: bool = Field(True, description="Min+Solar starts")
+    minsolar_charging_stopped: bool = Field(True, description="Min+Solar ends")
+    battery_boost_activated: bool = Field(True, description="Home battery boosting EV")
+    charging_updates: bool = Field(True, description="Updates every 30s while charging")
+
+
+class EVCCConfig(BaseModel):
+    """EVCC integration configuration."""
+    enabled: bool = Field(False, description="Enable EVCC monitoring")
+    url: str = Field("http://localhost:7070", description="EVCC server URL")
+    loadpoint_id: int = Field(1, description="Loadpoint ID to monitor (1-indexed)")
+    poll_interval_seconds: int = Field(30, description="Seconds between state polls")
+    notifications: EVCCNotificationsConfig = EVCCNotificationsConfig()
+
+
 class AppConfig(BaseModel):
     """Complete application configuration."""
     mqtt: MQTTConfig
@@ -60,3 +87,4 @@ class AppConfig(BaseModel):
     charging: ChargingConfig = ChargingConfig()
     logging: LoggingConfig = LoggingConfig()
     apns: APNsConfig = APNsConfig()
+    evcc: EVCCConfig = EVCCConfig()
