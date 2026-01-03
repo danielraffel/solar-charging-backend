@@ -48,3 +48,7 @@ data/
 # OS
 .DS_Store
 Thumbs.db
+
+# APNs keys (NEVER commit these!)
+*.p8
+keys/

@@ -27,9 +27,19 @@ class ChargingScheduleManager:
         self.is_charging = False
         self.charge_started_at: Optional[datetime] = None
         self.monitoring_task: Optional[asyncio.Task] = None
+        self._apns_service = None  # Optional APNs service for push notifications
 
         # Register SOC callback with MQTT client
         self.mqtt.set_soc_callback(self._on_soc_update)
+
+    def set_apns_service(self, apns_service):
+        """Set the APNs service for push notifications.
+
+        Args:
+            apns_service: APNsService instance
+        """
+        self._apns_service = apns_service
+        logger.info("APNs service connected to scheduler")
 
     def start(self):
         """Start the scheduler."""
@@ -42,6 +52,31 @@ class ChargingScheduleManager:
             self.monitoring_task.cancel()
         self.scheduler.shutdown()
         logger.info("Charging schedule manager stopped")
+
+    def start_soc_monitoring(self, schedule: ScheduleData):
+        """Start SOC monitoring for immediate charging (Phase 2 API).
+
+        Called by /api/charging/enable to monitor SOC and auto-stop when target reached.
+        This is the same monitoring used for scheduled charges.
+        """
+        # Cancel any existing monitoring task
+        if self.monitoring_task:
+            self.monitoring_task.cancel()
+            logger.info("Cancelled previous monitoring task")
+
+        # Start new monitoring task
+        self.monitoring_task = asyncio.create_task(self._monitor_charging(schedule))
+        logger.info(f"Started SOC monitoring: target={schedule.target_soc}%")
+
+        # Schedule safety cutoff
+        cutoff_time = datetime.now() + timedelta(hours=self.config.safety_cutoff_hours)
+        self.scheduler.add_job(
+            self._safety_cutoff,
+            trigger=DateTrigger(run_date=cutoff_time),
+            id="safety_cutoff",
+            replace_existing=True
+        )
+        logger.info(f"Safety cutoff scheduled for {cutoff_time}")
 
     def set_schedule(self, schedule: ScheduleData):
         """Set or update the charging schedule."""
@@ -197,6 +232,7 @@ class ChargingScheduleManager:
             await asyncio.sleep(0.5)  # Brief delay between publishes
 
             # 3. Set ACChgMode=4 (Time+SOC mode) so inverter honors SOC limit
+            # Without ACChgMode=4, the inverter ignores ACChgSOCLimit entirely
             if not self.mqtt.publish_ac_charge_mode(4):
                 logger.error("Failed to set ACChgMode")
                 return False
@@ -211,6 +247,7 @@ class ChargingScheduleManager:
             self.is_charging = True
             self.charge_started_at = datetime.now()
             logger.info(f"✅ Charging started successfully")
+            logger.info(f"   ACChgMode: 4 (Time+SOC)")
             logger.info(f"   Time window: {start_time_str} → {end_time_str} (safety cutoff)")
             logger.info(f"   Target SOC: {schedule.target_soc}%")
             logger.info(f"   Backend will monitor and stop when SOC target reached")
@@ -273,6 +310,12 @@ class ChargingScheduleManager:
                 if current_soc >= schedule.target_soc:
                     logger.info(f"Target SOC reached ({current_soc}% >= {schedule.target_soc}%)")
                     await self._stop_charging()
+
+                    # Send push notification to iOS app
+                    await self._send_charge_complete_notification(
+                        target_soc=schedule.target_soc,
+                        final_soc=current_soc
+                    )
 
                     # Handle completion based on mode
                     if schedule.mode == "recurring" and self.current_schedule:
@@ -339,3 +382,23 @@ class ChargingScheduleManager:
         # Clear current schedule
         self.current_schedule = None
         logger.info("One-time schedule cleared - ready for new schedule")
+
+    async def _send_charge_complete_notification(self, target_soc: int, final_soc: int):
+        """Send push notification to iOS app that charging is complete.
+
+        Args:
+            target_soc: The target SOC that was set
+            final_soc: The actual final SOC achieved
+        """
+        if self._apns_service is None:
+            logger.debug("APNs service not configured, skipping notification")
+            return
+
+        try:
+            sent_count = await self._apns_service.send_charge_complete(target_soc, final_soc)
+            if sent_count > 0:
+                logger.info(f"Sent charge complete notification to {sent_count} device(s)")
+            else:
+                logger.debug("No devices registered for push notifications")
+        except Exception as e:
+            logger.error(f"Failed to send charge complete notification: {e}")

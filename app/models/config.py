@@ -43,9 +43,20 @@ class LoggingConfig(BaseModel):
     level: str = Field("INFO", description="Log level (DEBUG, INFO, WARNING, ERROR)")
 
 
+class APNsConfig(BaseModel):
+    """Apple Push Notification service configuration."""
+    enabled: bool = Field(False, description="Enable APNs notifications")
+    key_path: str = Field("", description="Path to APNs .p8 key file")
+    key_id: str = Field("", description="APNs Key ID (10 characters)")
+    team_id: str = Field("", description="Apple Developer Team ID (10 characters)")
+    bundle_id: str = Field("", description="iOS app bundle identifier")
+    use_sandbox: bool = Field(False, description="Use APNs sandbox for development")
+
+
 class AppConfig(BaseModel):
     """Complete application configuration."""
     mqtt: MQTTConfig
     server: ServerConfig = ServerConfig()
     charging: ChargingConfig = ChargingConfig()
     logging: LoggingConfig = LoggingConfig()
+    apns: APNsConfig = APNsConfig()

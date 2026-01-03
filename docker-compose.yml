@@ -10,6 +10,7 @@ services:
     volumes:
       - ./config.yaml:/app/config.yaml:ro  # Mount config as read-only
       - ./data:/app/data                    # Persistent data storage
+      - ./keys:/app/keys:ro                 # APNs keys (read-only)
     environment:
       - TZ=America/Los_Angeles              # Set your timezone
       - SERVER_PORT=${CONTAINER_PORT:-8088} # Override config file port if needed

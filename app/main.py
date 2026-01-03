@@ -15,7 +15,8 @@ import yaml
 from .models import AppConfig, ScheduleData
 from .mqtt import MQTTClient
 from .scheduler import ChargingScheduleManager
-from .api import health_router, charge_router
+from .api import health_router, charge_router, device_router
+from .notifications import APNsService
 
 
 # Configure logging
@@ -41,6 +42,7 @@ class AppState:
         self.config: Optional[AppConfig] = None
         self.mqtt: Optional[MQTTClient] = None
         self.scheduler: Optional[ChargingScheduleManager] = None
+        self.apns: Optional[APNsService] = None
         self.data_dir = Path("data")
         self.schedule_file = self.data_dir / "schedule.json"
 
@@ -124,6 +126,18 @@ async def lifespan(app: FastAPI):
         logger.info(f"Restoring saved schedule: {saved_schedule}")
         app_state.scheduler.set_schedule(saved_schedule)
 
+    # Initialize APNs service for push notifications
+    app_state.apns = APNsService(app_state.config.apns)
+    if app_state.config.apns.enabled:
+        if await app_state.apns.initialize():
+            # Pass APNs service to scheduler for charge complete notifications
+            app_state.scheduler.set_apns_service(app_state.apns)
+            logger.info("APNs service initialized and connected to scheduler")
+        else:
+            logger.warning("APNs service failed to initialize - push notifications disabled")
+    else:
+        logger.info("APNs service disabled in configuration")
+
     logger.info("Solar Charging Backend started successfully")
 
     yield
@@ -155,6 +169,7 @@ app.add_middleware(
 # Register routers
 app.include_router(health_router, prefix="/api", tags=["health"])
 app.include_router(charge_router, prefix="/api", tags=["charging"])
+app.include_router(device_router, prefix="/api", tags=["device"])
 
 
 @app.get("/")

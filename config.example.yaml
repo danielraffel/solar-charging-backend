@@ -20,3 +20,13 @@ charging:
 
 logging:
   level: "INFO"                    # Log level: DEBUG, INFO, WARNING, ERROR
+
+# Apple Push Notification service (optional)
+# Required for push notifications when charging completes
+apns:
+  enabled: false                    # Set to true to enable push notifications
+  key_path: "/path/to/AuthKey_XXXXX.p8"  # Path to APNs .p8 key file (not committed to repo)
+  key_id: "XXXXXXXXXX"             # APNs Key ID from Apple Developer Portal (10 characters)
+  team_id: "XXXXXXXXXX"            # Apple Developer Team ID (10 characters)
+  bundle_id: "com.generouscorp.Solar"  # iOS app bundle identifier
+  use_sandbox: false               # true for development, false for production/TestFlight

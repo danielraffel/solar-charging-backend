@@ -27,7 +27,7 @@ iOS background tasks (`BGTaskScheduler`) are unreliable for time-sensitive opera
 
 ```bash
 # 1. Clone and configure
-git clone https://github.com/danielraffel/solar-charging-backend.git
+git clone <repo-url>
 cd solar-charging-backend
 cp config.example.yaml config.yaml
 # Edit config.yaml with your MQTT broker details
@@ -61,7 +61,7 @@ Done! The service is now running and ready to accept commands from your iOS app.
 
 ```bash
 # 1. Clone repository
-git clone https://github.com/danielraffel/solar-charging-backend.git
+git clone <repo-url>
 cd solar-charging-backend
 
 # 2. Create virtual environment
@@ -103,6 +103,10 @@ charging:
 
 logging:
   level: "INFO"                   # DEBUG | INFO | WARNING | ERROR
+
+# Optional: Push notifications (see APNs Setup section below)
+apns:
+  enabled: false
 ```
 
 ### Finding Your Dongle Prefix
@@ -286,97 +290,6 @@ Then:
 launchctl load ~/Library/LaunchAgents/com.solar.charging-backend.plist
 ```
 
-## 🐧 Running on Linux (Auto-Start on Reboot)
-
-For production deployments on Linux servers (Ubuntu, Debian, etc.), you have two options to ensure the backend starts automatically on reboot.
-
-### Option 1: Using Crontab (Simple)
-
-1. Edit your crontab:
-```bash
-crontab -e
-```
-
-2. Add this line:
-```bash
-@reboot cd /opt/solar-charging-backend && /usr/bin/docker compose up -d
-```
-
-3. Save and verify:
-```bash
-crontab -l
-```
-
-### Option 2: Using systemd (Recommended for Production)
-
-Create a systemd service for better process management and logging:
-
-1. Create service file:
-```bash
-sudo nano /etc/systemd/system/solar-charging-backend.service
-```
-
-2. Add this content:
-```ini
-[Unit]
-Description=Solar Charging Backend
-Requires=docker.service
-After=docker.service
-
-[Service]
-Type=oneshot
-RemainAfterExit=yes
-WorkingDirectory=/opt/solar-charging-backend
-ExecStart=/usr/bin/docker compose up -d
-ExecStop=/usr/bin/docker compose down
-User=root
-Group=root
-
-[Install]
-WantedBy=multi-user.target
-```
-
-3. Enable and start:
-```bash
-sudo systemctl daemon-reload
-sudo systemctl enable solar-charging-backend
-sudo systemctl start solar-charging-backend
-```
-
-4. Check status:
-```bash
-sudo systemctl status solar-charging-backend
-```
-
-### Verify Auto-Start
-
-After server reboot:
-```bash
-docker ps | grep solar-charging-backend
-```
-
-Expected output:
-```
-CONTAINER ID   IMAGE                              STATUS
-abc123def456   solar-charging-backend_backend     Up 2 minutes
-```
-
-### Manual Service Control
-
-```bash
-# Start
-cd /opt/solar-charging-backend && docker compose up -d
-
-# Stop
-cd /opt/solar-charging-backend && docker compose down
-
-# Restart
-cd /opt/solar-charging-backend && docker compose restart
-
-# View logs
-cd /opt/solar-charging-backend && docker compose logs -f
-```
-
 ## 🐛 Troubleshooting
 
 ### "Failed to connect to MQTT"
@@ -451,30 +364,111 @@ pytest
 app/
 ├── api/          # FastAPI endpoints
 │   ├── health.py # Health check
-│   └── charge.py # Charging endpoints
+│   ├── charge.py # Charging endpoints
+│   └── device.py # Device registration (push notifications)
 ├── mqtt/         # MQTT client
 │   └── client.py # Connection & publishing
 ├── scheduler/    # Job scheduling
 │   └── manager.py # APScheduler integration
+├── notifications/ # Push notifications
+│   └── apns.py   # Apple Push Notification service
 ├── models/       # Pydantic models
 │   ├── config.py # Configuration
 │   └── schedule.py # Schedule/response models
 └── main.py       # FastAPI app setup
 ```
 
+## 📱 Push Notifications (APNs) Setup
+
+Push notifications allow the backend to notify the iOS app when charging is complete, even if the app is backgrounded or closed. This enables the Live Activity to end properly.
+
+### Push Notifications Are Optional
+
+**The backend works without push notifications.** If you don't configure APNs:
+- Scheduled charging still works perfectly
+- SOC monitoring and auto-stop still work
+- Live Activities work when the app is in foreground
+- Only limitation: Live Activities won't end when the app is fully backgrounded
+
+This is fine for most users. Push notifications are an enhancement, not a requirement.
+
+### For Open Source / Self-Hosted Users
+
+If you're building this app from source for your own use:
+
+1. **Same bundle ID as original app**: You cannot generate an APNs key for someone else's bundle ID. You'd need to obtain their key (with permission) or skip push notifications.
+
+2. **Your own bundle ID**: If you change the bundle ID to your own (e.g., `com.yourname.SolarApp`), you can generate your own APNs key that will work with your build.
+
+The APNs key authenticates the **backend** to send notifications to devices running apps with a **matching bundle ID**. This is an Apple security requirement.
+
+### Prerequisites
+
+1. **Apple Developer Account** ($99/year) with APNs enabled
+2. **APNs Key (.p8 file)** from Apple Developer Portal
+3. **Key ID** and **Team ID** from your Apple Developer account
+4. **Bundle ID** that matches your iOS app build
+
+### Step 1: Create APNs Key
+
+1. Go to [Apple Developer Portal - Keys](https://developer.apple.com/account/resources/authkeys/list)
+2. Click "+" to create a new key
+3. Enter a name (e.g., "Solar App APNs Key")
+4. Check "Apple Push Notifications service (APNs)"
+5. Click "Continue", then "Register"
+6. **Download the .p8 file** (you can only download once!)
+7. Note the **Key ID** (10 characters, e.g., "K4QVR32WLW")
+
+### Step 2: Find Your Team ID
+
+1. Go to [Apple Developer Account](https://developer.apple.com/account)
+2. Your Team ID is displayed in the membership section (10 characters, e.g., "95CX6P84C4")
+
+### Step 3: Configure Backend
+
+1. Copy the .p8 key file to your server (e.g., `/opt/solar-charging-backend/keys/`)
+2. **IMPORTANT:** Never commit the .p8 file to version control!
+3. Update `config.yaml`:
+
+```yaml
+apns:
+  enabled: true
+  key_path: "/opt/solar-charging-backend/keys/AuthKey_XXXXXXXX.p8"
+  key_id: "XXXXXXXXXX"        # Your Key ID from Step 1
+  team_id: "XXXXXXXXXX"       # Your Team ID from Step 2
+  bundle_id: "com.generouscorp.Solar"
+  use_sandbox: false          # false for TestFlight/Production
+```
+
+### Step 4: Install Dependency
+
+```bash
+pip install aioapns==3.2
+# or update via: pip install -r requirements.txt
+```
+
+### Step 5: Restart Service
+
+```bash
+docker-compose restart
+# or: systemctl restart solar-backend
+```
+
+### Verification
+
+Check the logs for successful initialization:
+```
+INFO - APNs service initialized (sandbox=False)
+INFO - APNs service connected to scheduler
+```
+
+### Security Note
+
+The APNs key file (`.p8`) is sensitive and should never be committed to version control. The `.gitignore` already excludes `.p8` files, but always verify before committing.
+
 ## 📝 License
 
-[Your license here]
-
-## 🤝 Contributing
-
-[Contribution guidelines]
-
-## 💬 Support
-
-- **Issues**: [GitHub Issues]
-- **Discussions**: [GitHub Discussions]
-- **Docs**: http://localhost:8088/docs (when running)
+MIT License - See [LICENSE](LICENSE) file for details.
 
 ---
 

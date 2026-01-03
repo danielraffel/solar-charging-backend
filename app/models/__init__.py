@@ -1,6 +1,6 @@
 """Data models for Solar Charging Backend."""
 
-from .config import AppConfig, MQTTConfig, ServerConfig, ChargingConfig, LoggingConfig
+from .config import AppConfig, MQTTConfig, ServerConfig, ChargingConfig, LoggingConfig, APNsConfig
 from .schedule import (
     ChargeScheduleRequest,
     ChargeScheduleResponse,
@@ -15,6 +15,7 @@ __all__ = [
     "ServerConfig",
     "ChargingConfig",
     "LoggingConfig",
+    "APNsConfig",
     "ChargeScheduleRequest",
     "ChargeScheduleResponse",
     "ChargeStatusResponse",
