@@ -228,15 +228,31 @@ class APNsService:
         vehicle_soc: int
     ) -> int:
         """Send EVCC mode change notification."""
+        # Map EVCC mode names to user-friendly names
+        mode_map = {
+            "off": "Off",
+            "now": "Fast",
+            "pv": "Solar",
+            "minpv": "Min+Solar"
+        }
+
+        prev_display = mode_map.get(previous_mode, previous_mode)
+        new_display = mode_map.get(new_mode, new_mode)
+
+        # Send as silent/background notification - iOS app will create local notification
+        # only if user has mode change alerts enabled (fixes notification showing when disabled)
         return await self._send_evcc_notification(
             notification_type="evcc_mode_changed",
             title="Charging Mode Changed",
-            body=f"Mode changed from {previous_mode} to {new_mode}",
+            body=f"Mode changed from {prev_display} to {new_display}",
             data={
                 "previous_mode": previous_mode,
                 "new_mode": new_mode,
                 "vehicle_soc": vehicle_soc,
-            }
+                "title": "Charging Mode Changed",
+                "body": f"Mode changed from {prev_display} to {new_display}",
+            },
+            silent=True  # Silent - iOS app creates local notification if enabled
         )
 
     async def send_evcc_plan_activated(
@@ -266,10 +282,10 @@ class APNsService:
         charging_power: float,
         mode: str
     ) -> int:
-        """Send notification when plan-based charging begins."""
+        """Send alert notification to wake app and trigger Plan charging Live Activity."""
         return await self._send_evcc_notification(
             notification_type="evcc_plan_charging_started",
-            title="Plan Charging Started",
+            title="Departure Plan Charging Started",
             body=f"Charging to {target_soc}% at {charging_power/1000:.1f} kW",
             data={
                 "plan_number": plan_number,
@@ -278,7 +294,7 @@ class APNsService:
                 "charging_power": int(charging_power),
                 "mode": mode,
             },
-            silent=True
+            silent=False  # Alert - wakes app to start Live Activity
         )
 
     async def send_evcc_plan_charging_update(
@@ -326,16 +342,16 @@ class APNsService:
         current_soc: int,
         charging_power: float
     ) -> int:
-        """Send notification when fast mode charging begins."""
+        """Send alert notification to wake app and trigger Fast charging Live Activity."""
         return await self._send_evcc_notification(
             notification_type="evcc_fast_charging_started",
-            title="Fast Charging Started",
+            title="Started Charging in Fast Mode",
             body=f"Charging at {charging_power/1000:.1f} kW",
             data={
                 "current_soc": current_soc,
                 "charging_power": int(charging_power),
             },
-            silent=True
+            silent=False  # Alert - wakes app to start Live Activity
         )
 
     async def send_evcc_fast_charging_stopped(
@@ -363,17 +379,17 @@ class APNsService:
         solar_power: float,
         charging_power: float
     ) -> int:
-        """Send notification when solar charging begins."""
+        """Send alert notification to wake app and trigger Solar charging Live Activity."""
         return await self._send_evcc_notification(
             notification_type="evcc_solar_charging_started",
-            title="Solar Charging Started",
+            title="Started Charging in Solar Mode",
             body=f"Charging at {charging_power/1000:.1f} kW from solar",
             data={
                 "current_soc": current_soc,
                 "solar_power": int(solar_power),
                 "charging_power": int(charging_power),
             },
-            silent=True
+            silent=False  # Alert - wakes app to start Live Activity
         )
 
     async def send_evcc_solar_charging_stopped(
@@ -402,10 +418,10 @@ class APNsService:
         solar_power: float,
         charging_power: float
     ) -> int:
-        """Send notification when min+solar charging begins."""
+        """Send alert notification to wake app and trigger Min+Solar charging Live Activity."""
         return await self._send_evcc_notification(
             notification_type="evcc_minsolar_charging_started",
-            title="Min+Solar Charging Started",
+            title="Started Charging in Min+Solar Mode",
             body=f"Charging at {charging_power/1000:.1f} kW",
             data={
                 "current_soc": current_soc,
@@ -413,7 +429,7 @@ class APNsService:
                 "solar_power": int(solar_power),
                 "charging_power": int(charging_power),
             },
-            silent=True
+            silent=False  # Alert - wakes app to start Live Activity
         )
 
     async def send_evcc_minsolar_charging_stopped(
@@ -449,7 +465,7 @@ class APNsService:
                 "battery_power": int(battery_power),
                 "home_soc": home_soc,
             },
-            silent=False  # This one should alert the user
+            silent=False  # User-facing notification
         )
 
     async def send_evcc_charging_update(
@@ -520,12 +536,21 @@ class APNsService:
 
                 push_type = PushType.BACKGROUND if silent else PushType.ALERT
 
+                # Debug: Log the full notification payload
+                logger.info(f"📤 Sending {notification_type} notification:")
+                logger.info(f"   Push Type: {push_type}")
+                logger.info(f"   Silent: {silent}")
+                logger.info(f"   Payload: {message}")
+
                 request = NotificationRequest(
                     device_token=token,
                     message=message,
                     push_type=push_type,
                 )
                 response = await self.client.send_notification(request)
+
+                # Debug: Log the response
+                logger.info(f"   APNs Response: is_successful={response.is_successful}, description={response.description}")
 
                 if response.is_successful:
                     success_count += 1
