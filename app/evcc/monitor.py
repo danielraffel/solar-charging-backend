@@ -107,6 +107,16 @@ class EVCCMonitorService:
                     changes = self.detect_state_changes(self._last_state, state)
                     if changes:
                         await self._process_changes(changes, state)
+
+                    # Send periodic updates while charging (keeps Live Activity alive)
+                    if state.charging and self.apns_service:
+                        await self.apns_service.send_evcc_charging_update(
+                            current_soc=state.vehicle_soc or 0,
+                            charging_power=float(state.charge_power),
+                            mode=state.mode,
+                            solar_power=float(state.pv_power) if state.pv_power else None
+                        )
+
                     self._last_state = state
             except Exception as e:
                 logger.error(f"Error in EVCC monitoring loop: {e}")
@@ -215,6 +225,22 @@ class EVCCMonitorService:
                 new_value=new_state.mode,
                 metadata={"vehicle_soc": new_state.vehicle_soc}
             ))
+
+            # If mode changed while already charging, send charging_started notification
+            # to trigger/update Live Activity for the new mode
+            if new_state.charging:
+                change_type = self._get_charging_started_type(new_state)
+                changes.append(StateChange(
+                    change_type=change_type,
+                    metadata={
+                        "mode": new_state.mode,
+                        "vehicle_soc": new_state.vehicle_soc,
+                        "charge_power": new_state.charge_power,
+                        "pv_power": new_state.pv_power,
+                        "plan_number": new_state.plan_number,
+                        "plan_soc": new_state.plan_soc,
+                    }
+                ))
 
         # Plan activation (one-time plans)
         if not old_state.plan_active and new_state.plan_active:
@@ -404,13 +430,13 @@ class EVCCMonitorService:
                     charged_kwh=meta.get("charged_energy", 0)
                 )
 
-            elif change.change_type == "battery_boost_activated":
-                # Get home battery SOC from somewhere (may need to pass in)
-                await self.apns_service.send_evcc_battery_boost_activated(
-                    vehicle_soc=meta.get("vehicle_soc", 0),
-                    battery_power=meta.get("battery_power", 0),
-                    home_soc=0  # TODO: Get from state
-                )
+            # NOTE: Battery boost notification removed (issue #8)
+            # Battery boost is detected and tracked, but notifications are NOT sent from backend
+            # because:
+            # 1. iOS can't filter ALERT notifications before they're displayed
+            # 2. The user may have battery boost notifications disabled in app settings
+            # 3. Battery boost info is already included in evcc_charging_update as battery_boosting flag
+            # The Live Activity already shows battery boost status via charging updates
 
         except Exception as e:
             logger.error(f"Error sending EVCC notification ({change.change_type}): {e}")
