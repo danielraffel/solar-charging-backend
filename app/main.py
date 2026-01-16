@@ -16,7 +16,7 @@ import yaml
 from .models import AppConfig, ScheduleData
 from .mqtt import MQTTClient
 from .scheduler import ChargingScheduleManager
-from .api import health_router, charge_router, device_router
+from .api import health_router, charge_router, device_router, debug_router
 from .notifications import APNsService
 from .evcc import EVCCMonitorService
 
@@ -188,6 +188,7 @@ app.add_middleware(
 app.include_router(health_router, prefix="/api", tags=["health"])
 app.include_router(charge_router, prefix="/api", tags=["charging"])
 app.include_router(device_router, prefix="/api", tags=["device"])
+app.include_router(debug_router, prefix="/api", tags=["debug"])
 
 
 @app.get("/")
