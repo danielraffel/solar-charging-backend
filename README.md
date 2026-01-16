@@ -477,3 +477,177 @@ MIT License - See [LICENSE](LICENSE) file for details.
 2. Configure iOS app to use backend (see iOS integration guide)
 3. Test scheduling from iOS app
 4. Enjoy reliable charging! ⚡
+
+## 🖥️ Admin Dashboard
+
+A web-based status dashboard is available at `/admin` for monitoring the system without needing SSH access.
+
+**URL:** `http://<your-server>:8088/admin`
+
+### Features
+
+- **Battery Status**: Current SOC, power flow, charging state
+- **Backend Schedule**: Shows active schedules with target SOC and next run time
+- **Quick Actions**: 
+  - "Cancel Schedule" - Remove pending schedule
+  - "Stop Charging Now" - Immediately stop active charging
+- **Auto-refresh**: Updates every 10 seconds
+- **Dark theme**: iOS-style dark mode interface
+
+### Use Cases
+
+- Quick "is anything running?" check
+- Emergency stop if unexpected charging occurs
+- Monitor charging progress remotely
+
+## 🔧 Debug API Endpoints
+
+Debug endpoints for remote introspection, useful for troubleshooting without SSH access.
+
+All endpoints are prefixed with `/api/debug/`.
+
+### GET /api/debug/state
+
+Returns current application state.
+
+```bash
+curl http://localhost:8088/api/debug/state
+```
+
+Response:
+```json
+{
+  "uptime_seconds": 3600.0,
+  "mqtt_connected": true,
+  "mqtt_current_soc": 75,
+  "mqtt_battery_power": 2500.0,
+  "scheduler_running": true,
+  "scheduler_is_charging": false,
+  "scheduler_charge_started_at": null,
+  "schedule_enabled": true,
+  "schedule_target_soc": 85,
+  "schedule_start_time": "02:30",
+  "schedule_mode": "recurring",
+  "schedule_next_run": "2026-01-17T02:30:00",
+  "apns_enabled": true,
+  "apns_connected": true,
+  "evcc_monitor_running": true
+}
+```
+
+### GET /api/debug/config
+
+Returns current configuration (sanitized - no secrets like passwords or APNs keys).
+
+```bash
+curl http://localhost:8088/api/debug/config
+```
+
+Response:
+```json
+{
+  "mqtt_host": "192.168.86.101",
+  "mqtt_port": 1883,
+  "mqtt_connected": true,
+  "charging_safety_cutoff_hours": 8,
+  "charging_soc_check_interval": 30,
+  "apns_enabled": true,
+  "apns_sandbox": true,
+  "evcc_enabled": true,
+  "evcc_url": "http://192.168.86.68:7070",
+  "server_port": 8088,
+  "log_level": "DEBUG"
+}
+```
+
+### GET /api/debug/mqtt
+
+Returns MQTT connection details.
+
+```bash
+curl http://localhost:8088/api/debug/mqtt
+```
+
+Response:
+```json
+{
+  "connected": true,
+  "broker": "192.168.86.101",
+  "port": 1883,
+  "client_id": "solar-backend-12345",
+  "subscribed_topics": ["dongle-XX:XX/inputbank1", "dongle-XX:XX/response"],
+  "last_soc_update": "2026-01-16T12:30:00",
+  "current_soc": 75,
+  "battery_power": 2500.0,
+  "recent_publishes": []
+}
+```
+
+### GET /api/debug/files
+
+List files in a directory (restricted to `/app` inside the container).
+
+```bash
+curl "http://localhost:8088/api/debug/files?path=app/api"
+```
+
+Response:
+```json
+{
+  "type": "directory",
+  "path": "app/api",
+  "files": [
+    {"name": "__init__.py", "type": "file", "size": 275, "modified": "2026-01-16T13:11:42"},
+    {"name": "charge.py", "type": "file", "size": 10073, "modified": "2026-01-03T23:44:27"},
+    {"name": "debug.py", "type": "file", "size": 9783, "modified": "2026-01-16T13:14:21"}
+  ]
+}
+```
+
+### GET /api/debug/file
+
+Read a file's contents (max 100KB, restricted to `/app`).
+
+```bash
+curl "http://localhost:8088/api/debug/file?path=app/models/config.py"
+```
+
+Response:
+```json
+{
+  "path": "app/models/config.py",
+  "content": "\"\"\"Configuration models...",
+  "size": 2456
+}
+```
+
+### POST /api/debug/restart-hint
+
+Returns instructions for restarting the backend (does not actually restart).
+
+```bash
+curl -X POST http://localhost:8088/api/debug/restart-hint
+```
+
+Response:
+```json
+{
+  "message": "To restart the backend, run these commands:",
+  "commands": [
+    "ssh teslaproxy 'cd /opt/solar-charging-backend && docker compose restart'",
+    "ssh teslaproxy 'cd /opt/solar-charging-backend && docker compose down && docker compose build --no-cache && docker compose up -d'"
+  ],
+  "note": "This endpoint does not restart automatically for safety"
+}
+```
+
+### Note on Logs
+
+The `/api/debug/logs` endpoint exists but does not work from inside the container (Docker CLI is not available). For logs, use:
+
+```bash
+ssh your-server "docker logs solar-charging-backend"
+# or
+ssh your-server "docker logs --tail 100 -f solar-charging-backend"
+```
+
