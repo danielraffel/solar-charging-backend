@@ -1,0 +1,470 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Solar Status Dashboard</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            max-width: 500px;
+            margin: 0 auto;
+            padding: 16px;
+            background: #1a1a1a;
+            color: #fff;
+            min-height: 100vh;
+        }
+        h1 { font-size: 24px; margin-bottom: 4px; }
+        .subtitle { color: #888; font-size: 14px; margin-bottom: 20px; }
+        .status-dot {
+            display: inline-block;
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            margin-right: 6px;
+        }
+        .dot-green { background: #34c759; }
+        .dot-red { background: #ff3b30; }
+        .dot-orange { background: #ff9500; }
+        .dot-blue { background: #007aff; }
+        
+        .card {
+            background: #2a2a2a;
+            border-radius: 16px;
+            padding: 16px;
+            margin-bottom: 16px;
+        }
+        .card-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 12px;
+        }
+        .card-title {
+            font-size: 13px;
+            color: #888;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        
+        /* Big status display */
+        .big-status {
+            text-align: center;
+            padding: 24px 0;
+        }
+        .big-status-icon {
+            font-size: 48px;
+            margin-bottom: 8px;
+        }
+        .big-status-text {
+            font-size: 28px;
+            font-weight: 600;
+        }
+        .big-status-sub {
+            color: #888;
+            font-size: 14px;
+            margin-top: 4px;
+        }
+        
+        /* Status rows */
+        .status-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 12px 0;
+            border-bottom: 1px solid #3a3a3a;
+        }
+        .status-row:last-child { border-bottom: none; }
+        .status-label { color: #888; font-size: 14px; }
+        .status-value { font-weight: 500; font-size: 15px; }
+        .status-value.charging { color: #34c759; }
+        .status-value.warning { color: #ff9500; }
+        .status-value.danger { color: #ff3b30; }
+        
+        /* Alert banner */
+        .alert {
+            padding: 12px 16px;
+            border-radius: 12px;
+            margin-bottom: 16px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        .alert-danger {
+            background: rgba(255, 59, 48, 0.15);
+            border: 1px solid rgba(255, 59, 48, 0.3);
+            color: #ff6961;
+        }
+        .alert-warning {
+            background: rgba(255, 149, 0, 0.15);
+            border: 1px solid rgba(255, 149, 0, 0.3);
+            color: #ffb340;
+        }
+        .alert-success {
+            background: rgba(52, 199, 89, 0.15);
+            border: 1px solid rgba(52, 199, 89, 0.3);
+            color: #4cd964;
+        }
+        .alert-info {
+            background: rgba(0, 122, 255, 0.15);
+            border: 1px solid rgba(0, 122, 255, 0.3);
+            color: #5ac8fa;
+        }
+        
+        /* Buttons */
+        .btn {
+            width: 100%;
+            padding: 14px;
+            border: none;
+            border-radius: 12px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            margin-top: 8px;
+        }
+        .btn-danger {
+            background: #ff3b30;
+            color: white;
+        }
+        .btn-danger:hover { background: #e6352b; }
+        .btn-danger:disabled {
+            background: #5a2a28;
+            color: #888;
+            cursor: not-allowed;
+        }
+        .btn-secondary {
+            background: #3a3a3a;
+            color: #fff;
+        }
+        .btn-secondary:hover { background: #4a4a4a; }
+        
+        /* Last updated */
+        .last-updated {
+            text-align: center;
+            color: #555;
+            font-size: 12px;
+            margin-top: 16px;
+        }
+        
+        /* Loading state */
+        .loading {
+            opacity: 0.5;
+        }
+        
+        /* Nothing active state */
+        .all-clear {
+            text-align: center;
+            padding: 32px 0;
+            color: #888;
+        }
+        .all-clear-icon {
+            font-size: 48px;
+            margin-bottom: 12px;
+        }
+        .all-clear-text {
+            font-size: 18px;
+            color: #4cd964;
+        }
+    </style>
+</head>
+<body>
+    <h1>Solar Status</h1>
+    <p class="subtitle"><span id="mqtt-dot" class="status-dot dot-red"></span><span id="mqtt-status">Connecting...</span></p>
+    
+    <!-- Alert Banner (hidden by default) -->
+    <div id="alert-banner" class="alert" style="display:none"></div>
+    
+    <!-- Live Power Status -->
+    <div class="card">
+        <div class="card-header">
+            <span class="card-title">Battery Status</span>
+            <span id="soc-badge" style="font-weight:600">--</span>
+        </div>
+        <div id="battery-status">
+            <div class="status-row">
+                <span class="status-label">State of Charge</span>
+                <span class="status-value" id="soc-value">--</span>
+            </div>
+            <div class="status-row">
+                <span class="status-label">Battery Power</span>
+                <span class="status-value" id="power-value">--</span>
+            </div>
+            <div class="status-row">
+                <span class="status-label">Grid Charging</span>
+                <span class="status-value" id="charging-value">--</span>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Backend Schedule Status -->
+    <div class="card">
+        <div class="card-header">
+            <span class="card-title">Backend Schedule</span>
+            <span id="schedule-badge" style="font-size:12px;color:#888">--</span>
+        </div>
+        <div id="schedule-status">
+            <div class="all-clear">
+                <div>Loading...</div>
+            </div>
+        </div>
+        <button class="btn btn-danger" id="cancel-schedule-btn" style="display:none">Cancel Schedule</button>
+    </div>
+    
+    <!-- Active Charging Session -->
+    <div class="card" id="charging-session-card" style="display:none">
+        <div class="card-header">
+            <span class="card-title">Active Charge Session</span>
+        </div>
+        <div id="charging-session-status"></div>
+        <button class="btn btn-danger" id="stop-charging-btn">Stop Charging Now</button>
+    </div>
+    
+    <!-- Quick Actions -->
+    <div class="card">
+        <div class="card-header">
+            <span class="card-title">Actions</span>
+        </div>
+        <button class="btn btn-secondary" id="refresh-btn">↻ Refresh Now</button>
+    </div>
+    
+    <div class="last-updated">Last updated: <span id="last-update">--</span></div>
+    <div class="last-updated" style="margin-top:4px">Auto-refresh every 10 seconds</div>
+
+    <script>
+        let refreshInterval;
+        
+        async function fetchStatus() {
+            try {
+                // Fetch all data in parallel
+                const [rootResp, scheduleResp, chargingResp] = await Promise.all([
+                    fetch("/"),
+                    fetch("/api/charge/schedule"),
+                    fetch("/api/charging/status")
+                ]);
+                
+                const rootData = await rootResp.json();
+                const chargingData = await chargingResp.json();
+                
+                // MQTT Status
+                const mqttDot = document.getElementById("mqtt-dot");
+                const mqttStatus = document.getElementById("mqtt-status");
+                if (rootData.mqtt_connected) {
+                    mqttDot.className = "status-dot dot-green";
+                    mqttStatus.textContent = "MQTT Connected";
+                } else {
+                    mqttDot.className = "status-dot dot-red";
+                    mqttStatus.textContent = "MQTT Disconnected";
+                }
+                
+                // Battery Status
+                const soc = chargingData.current_soc;
+                const power = chargingData.battery_power;
+                const isCharging = chargingData.is_charging;
+                
+                document.getElementById("soc-value").textContent = soc !== null ? soc + "%" : "Unknown";
+                document.getElementById("soc-badge").textContent = soc !== null ? soc + "%" : "--";
+                
+                // Power display
+                const powerEl = document.getElementById("power-value");
+                if (power !== null) {
+                    if (power > 100) {
+                        powerEl.textContent = "+" + (power / 1000).toFixed(1) + " kW";
+                        powerEl.className = "status-value charging";
+                    } else if (power < -100) {
+                        powerEl.textContent = (power / 1000).toFixed(1) + " kW";
+                        powerEl.className = "status-value";
+                    } else {
+                        powerEl.textContent = "Idle";
+                        powerEl.className = "status-value";
+                    }
+                } else {
+                    powerEl.textContent = "Unknown";
+                    powerEl.className = "status-value";
+                }
+                
+                // Charging status  
+                const chargingEl = document.getElementById("charging-value");
+                if (isCharging) {
+                    chargingEl.textContent = "Active";
+                    chargingEl.className = "status-value charging";
+                } else {
+                    chargingEl.textContent = "Off";
+                    chargingEl.className = "status-value";
+                }
+                
+                // Schedule Status
+                const scheduleStatus = document.getElementById("schedule-status");
+                const scheduleBadge = document.getElementById("schedule-badge");
+                const cancelBtn = document.getElementById("cancel-schedule-btn");
+                const alertBanner = document.getElementById("alert-banner");
+                
+                let hasSchedule = false;
+                let scheduleData = null;
+                
+                if (scheduleResp.ok && scheduleResp.status !== 204) {
+                    try {
+                        scheduleData = await scheduleResp.json();
+                        hasSchedule = scheduleData && scheduleData.enabled;
+                    } catch (e) {
+                        hasSchedule = false;
+                    }
+                }
+                
+                if (hasSchedule && scheduleData) {
+                    scheduleBadge.textContent = scheduleData.mode === "recurring" ? "Recurring" : "One-time";
+                    scheduleBadge.style.color = "#ff9500";
+                    
+                    let nextRun = "Not scheduled";
+                    if (scheduleData.next_run) {
+                        const d = new Date(scheduleData.next_run);
+                        nextRun = d.toLocaleString();
+                    }
+                    
+                    scheduleStatus.innerHTML = 
+                        "<div class=\"status-row\">" +
+                            "<span class=\"status-label\">Target SOC</span>" +
+                            "<span class=\"status-value\">" + scheduleData.target_soc + "%</span>" +
+                        "</div>" +
+                        "<div class=\"status-row\">" +
+                            "<span class=\"status-label\">Start Time</span>" +
+                            "<span class=\"status-value\">" + scheduleData.start_time + "</span>" +
+                        "</div>" +
+                        "<div class=\"status-row\">" +
+                            "<span class=\"status-label\">Mode</span>" +
+                            "<span class=\"status-value\">" + (scheduleData.mode === "recurring" ? "Daily" : "Once") + "</span>" +
+                        "</div>" +
+                        "<div class=\"status-row\">" +
+                            "<span class=\"status-label\">Next Run</span>" +
+                            "<span class=\"status-value warning\">" + nextRun + "</span>" +
+                        "</div>";
+                    
+                    cancelBtn.style.display = "block";
+                    
+                    // Show alert
+                    alertBanner.className = "alert alert-warning";
+                    alertBanner.innerHTML = "⚠️ Schedule active: Will charge to " + scheduleData.target_soc + "% at " + scheduleData.start_time;
+                    alertBanner.style.display = "flex";
+                } else {
+                    scheduleBadge.textContent = "None";
+                    scheduleBadge.style.color = "#888";
+                    scheduleStatus.innerHTML = 
+                        "<div class=\"all-clear\">" +
+                            "<div class=\"all-clear-icon\">✓</div>" +
+                            "<div class=\"all-clear-text\">No schedule set</div>" +
+                        "</div>";
+                    cancelBtn.style.display = "none";
+                }
+                
+                // Active Charging Session
+                const sessionCard = document.getElementById("charging-session-card");
+                const sessionStatus = document.getElementById("charging-session-status");
+                
+                if (isCharging) {
+                    sessionCard.style.display = "block";
+                    
+                    let startedAt = "--";
+                    if (chargingData.charge_started_at) {
+                        const d = new Date(chargingData.charge_started_at);
+                        startedAt = d.toLocaleTimeString();
+                    }
+                    
+                    sessionStatus.innerHTML = 
+                        "<div class=\"status-row\">" +
+                            "<span class=\"status-label\">Started</span>" +
+                            "<span class=\"status-value\">" + startedAt + "</span>" +
+                        "</div>" +
+                        "<div class=\"status-row\">" +
+                            "<span class=\"status-label\">Current SOC</span>" +
+                            "<span class=\"status-value charging\">" + (soc || "--") + "%</span>" +
+                        "</div>" +
+                        "<div class=\"status-row\">" +
+                            "<span class=\"status-label\">Target SOC</span>" +
+                            "<span class=\"status-value\">" + (chargingData.target_soc || "--") + "%</span>" +
+                        "</div>" +
+                        "<div class=\"status-row\">" +
+                            "<span class=\"status-label\">Power</span>" +
+                            "<span class=\"status-value charging\">" + (power ? "+" + (power/1000).toFixed(1) + " kW" : "--") + "</span>" +
+                        "</div>";
+                    
+                    // Show danger alert for active charging
+                    alertBanner.className = "alert alert-danger";
+                    alertBanner.innerHTML = "⚡ Charging now: " + (soc || "--") + "% → " + (chargingData.target_soc || "--") + "%";
+                    alertBanner.style.display = "flex";
+                } else {
+                    sessionCard.style.display = "none";
+                    
+                    // If no schedule either, show all clear
+                    if (!hasSchedule) {
+                        alertBanner.className = "alert alert-success";
+                        alertBanner.innerHTML = "✓ All clear - nothing scheduled or charging";
+                        alertBanner.style.display = "flex";
+                    }
+                }
+                
+                // Update timestamp
+                document.getElementById("last-update").textContent = new Date().toLocaleTimeString();
+                
+            } catch (err) {
+                console.error("Error:", err);
+                document.getElementById("alert-banner").className = "alert alert-danger";
+                document.getElementById("alert-banner").innerHTML = "❌ Error: " + err.message;
+                document.getElementById("alert-banner").style.display = "flex";
+            }
+        }
+        
+        // Cancel schedule
+        document.getElementById("cancel-schedule-btn").addEventListener("click", async () => {
+            if (!confirm("Cancel this schedule?")) return;
+            
+            const btn = document.getElementById("cancel-schedule-btn");
+            btn.disabled = true;
+            btn.textContent = "Canceling...";
+            
+            try {
+                const resp = await fetch("/api/charge/schedule", { method: "DELETE" });
+                if (resp.ok) {
+                    fetchStatus();
+                } else {
+                    alert("Failed to cancel schedule");
+                }
+            } catch (err) {
+                alert("Error: " + err.message);
+            } finally {
+                btn.disabled = false;
+                btn.textContent = "Cancel Schedule";
+            }
+        });
+        
+        // Stop charging
+        document.getElementById("stop-charging-btn").addEventListener("click", async () => {
+            if (!confirm("Stop charging immediately?")) return;
+            
+            const btn = document.getElementById("stop-charging-btn");
+            btn.disabled = true;
+            btn.textContent = "Stopping...";
+            
+            try {
+                const resp = await fetch("/api/charging/disable", { method: "POST" });
+                if (resp.ok) {
+                    fetchStatus();
+                } else {
+                    alert("Failed to stop charging");
+                }
+            } catch (err) {
+                alert("Error: " + err.message);
+            } finally {
+                btn.disabled = false;
+                btn.textContent = "Stop Charging Now";
+            }
+        });
+        
+        // Refresh button
+        document.getElementById("refresh-btn").addEventListener("click", fetchStatus);
+        
+        // Initial load and auto-refresh
+        fetchStatus();
+        refreshInterval = setInterval(fetchStatus, 10000);
+    </script>
+</body>
+</html>
