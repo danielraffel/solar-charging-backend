@@ -182,9 +182,9 @@ async def get_mqtt_debug():
 
     return MQTTDebugResponse(
         connected=mqtt.connected,
-        broker=app_state.config.mqtt.broker,
+        broker=app_state.config.mqtt.host,
         port=app_state.config.mqtt.port,
-        client_id=mqtt._client._client_id.decode() if (mqtt._client and mqtt._client._client_id) else None,
+        client_id=mqtt.client._client_id.decode() if (mqtt.client and mqtt.client._client_id) else None,
         subscribed_topics=list(getattr(mqtt, "subscribed_topics", [])),
         last_soc_update=getattr(mqtt, "last_soc_update", None),
         current_soc=mqtt.current_soc,
