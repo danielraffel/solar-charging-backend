@@ -1,0 +1,49 @@
+mqtt:
+  host: "192.168.86.101"
+  port: 1883
+  username: "henryjunior"
+  password: "WCGsRgbj-4UF@@Fw2sBDiYcx"
+  dongle_prefix: "dongle-40:4C:CA:4C:13:F4"
+
+server:
+  host: "0.0.0.0"
+  port: 8080
+
+charging:
+  safety_cutoff_hours: 8
+  soc_check_interval: 30
+  retry_on_failure: true
+  max_retries: 3
+
+logging:
+  level: "DEBUG"
+
+apns:
+  enabled: true
+  key_path: "/app/keys/AuthKey_K4QVR32WLW.p8"
+  key_id: "K4QVR32WLW"
+  team_id: "95CX6P84C4"
+  bundle_id: "com.generouscorp.Solar"
+  use_sandbox: false
+
+# EVCC Integration for EV Charging Live Activities
+evcc:
+  enabled: true                    # Enable EVCC monitoring
+  url: "http://192.168.86.68:7070" # EVCC server URL
+  loadpoint_id: 0                  # Loadpoint ID to monitor
+  poll_interval_seconds: 30        # Seconds between state polls
+  notifications:
+    enabled: true
+    plan_activated: true
+    plan_charging_started: true
+    plan_charging_updates: true
+    plan_complete: true
+    mode_changed: true
+    fast_charging_started: true
+    fast_charging_stopped: true
+    solar_charging_started: true
+    solar_charging_stopped: true
+    minsolar_charging_started: true
+    minsolar_charging_stopped: true
+    battery_boost_activated: true
+    charging_updates: true

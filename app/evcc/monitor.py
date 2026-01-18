@@ -167,6 +167,11 @@ class EVCCMonitorService:
                 if plans:
                     plan_number = 1  # Default to plan 1
 
+                # If planSoc is missing, try to get from vehicle limit or default to 100%
+                if plan_soc is None:
+                    plan_soc = lp.get("vehicleLimitSoc", 100)
+                    logger.warning(f"planSoc missing from EVCC response, using fallback: {plan_soc}%")
+
             # Detect battery boost (home battery discharging to EV)
             battery_boost = (
                 lp.get("charging", False) and
