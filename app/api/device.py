@@ -13,8 +13,9 @@ router = APIRouter()
 class NotificationPreferences(BaseModel):
     """User preferences for what notifications to receive.
 
-    All preferences default to True for backward compatibility.
-    When a device registers without preferences, all notifications are enabled.
+    All preferences default to True for backward compatibility,
+    EXCEPT evcc_charging_started_notifications which defaults to False
+    (these can be noisy in PV mode where charging starts/stops frequently).
     """
     # AC Charging notifications
     ac_charging_notifications: bool = True
@@ -23,6 +24,8 @@ class NotificationPreferences(BaseModel):
     evcc_mode_change_notifications: bool = True
     evcc_battery_boost_notifications: bool = True
     evcc_live_activities: bool = True
+    # Charging started alerts - OFF by default (can be noisy in PV mode)
+    evcc_charging_started_notifications: bool = False
 
 
 class DeviceRegisterRequest(BaseModel):

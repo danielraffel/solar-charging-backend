@@ -189,17 +189,30 @@ class APNsService:
                 )
             return enabled
 
-        # EVCC Live Activities (all charging start/update/stop notifications)
+        # EVCC "Charging Started" notifications (solar, fast, minSolar modes)
+        # These are automatic state changes that can be noisy, especially in PV mode
+        # OFF by default - separate from Live Activities preference
+        if notification_type in (
+            'evcc_fast_charging_started',
+            'evcc_solar_charging_started',
+            'evcc_minsolar_charging_started',
+        ):
+            enabled = prefs.get('evcc_charging_started_notifications', False)  # OFF by default
+            if not enabled:
+                logger.debug(
+                    f"Skipping {notification_type} for {device_info.token[:20]}... "
+                    "(EVCC Charging Started notifications disabled)"
+                )
+            return enabled
+
+        # EVCC Live Activities (plan and update notifications - NOT charging started)
         if notification_type in (
             'evcc_plan_activated',
             'evcc_plan_charging_started',
             'evcc_plan_charging_update',
             'evcc_plan_complete',
-            'evcc_fast_charging_started',
             'evcc_fast_charging_stopped',
-            'evcc_solar_charging_started',
             'evcc_solar_charging_stopped',
-            'evcc_minsolar_charging_started',
             'evcc_minsolar_charging_stopped',
             'evcc_charging_update'
         ):
