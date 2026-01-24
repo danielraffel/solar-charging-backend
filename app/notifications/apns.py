@@ -205,15 +205,30 @@ class APNsService:
                 )
             return enabled
 
-        # EVCC Live Activities (plan and update notifications - NOT charging started)
+        # EVCC "Charging Stopped" notifications - send if EITHER preference is enabled:
+        # - evcc_live_activities: Silent notification to end Live Activity
+        # - evcc_charging_stopped_notifications: Visible alert banner
+        if notification_type in (
+            'evcc_fast_charging_stopped',
+            'evcc_solar_charging_stopped',
+            'evcc_minsolar_charging_stopped',
+        ):
+            live_activities_enabled = prefs.get('evcc_live_activities', True)
+            alerts_enabled = prefs.get('evcc_charging_stopped_notifications', False)
+            enabled = live_activities_enabled or alerts_enabled
+            if not enabled:
+                logger.debug(
+                    f"Skipping {notification_type} for {device_info.token[:20]}... "
+                    "(Both EVCC Live Activities and Charging Stopped Alerts disabled)"
+                )
+            return enabled
+
+        # EVCC Live Activities (plan and update notifications - NOT charging started/stopped)
         if notification_type in (
             'evcc_plan_activated',
             'evcc_plan_charging_started',
             'evcc_plan_charging_update',
             'evcc_plan_complete',
-            'evcc_fast_charging_stopped',
-            'evcc_solar_charging_stopped',
-            'evcc_minsolar_charging_stopped',
             'evcc_charging_update'
         ):
             enabled = prefs.get('evcc_live_activities', True)
@@ -226,6 +241,15 @@ class APNsService:
 
         # Default: allow notification if preference not explicitly checked
         return True
+
+    def _wants_charging_stopped_alert(self, device_info: DeviceInfo) -> bool:
+        """Check if user wants visible alerts for charging stopped notifications.
+
+        Returns True if the user has enabled evcc_charging_stopped_notifications,
+        meaning they want a visible banner alert when charging ends.
+        """
+        prefs = device_info.preferences
+        return prefs.get('evcc_charging_stopped_notifications', False)
 
     async def send_charge_complete(self, target_soc: int, final_soc: int) -> int:
         """Send charge complete notification to devices with AC charging notifications enabled.
@@ -515,8 +539,12 @@ class APNsService:
         charged_kwh: float,
         duration_minutes: int
     ) -> int:
-        """Send notification when fast mode charging ends."""
-        return await self._send_evcc_notification(
+        """Send notification when fast mode charging ends.
+
+        Sends as visible alert if user has Charging Stopped Alerts enabled,
+        otherwise sends as silent background notification to end Live Activity.
+        """
+        return await self._send_evcc_charging_stopped_notification(
             notification_type="evcc_fast_charging_stopped",
             title="Fast Charging Complete",
             body=f"Charged to {final_soc}% (+{charged_kwh:.1f} kWh)",
@@ -524,8 +552,7 @@ class APNsService:
                 "final_soc": final_soc,
                 "charged_energy": charged_kwh,
                 "duration_minutes": duration_minutes,
-            },
-            silent=True
+            }
         )
 
     async def send_evcc_solar_charging_started(
@@ -553,8 +580,12 @@ class APNsService:
         charged_kwh: float,
         solar_percentage: float
     ) -> int:
-        """Send notification when solar charging ends."""
-        return await self._send_evcc_notification(
+        """Send notification when solar charging ends.
+
+        Sends as visible alert if user has Charging Stopped Alerts enabled,
+        otherwise sends as silent background notification to end Live Activity.
+        """
+        return await self._send_evcc_charging_stopped_notification(
             notification_type="evcc_solar_charging_stopped",
             title="Solar Charging Complete",
             body=f"Charged to {final_soc}% (+{charged_kwh:.1f} kWh)",
@@ -562,8 +593,7 @@ class APNsService:
                 "final_soc": final_soc,
                 "charged_energy": charged_kwh,
                 "solar_percentage": solar_percentage,
-            },
-            silent=True
+            }
         )
 
     async def send_evcc_minsolar_charging_started(
@@ -592,16 +622,19 @@ class APNsService:
         final_soc: int,
         charged_kwh: float
     ) -> int:
-        """Send notification when min+solar charging ends."""
-        return await self._send_evcc_notification(
+        """Send notification when min+solar charging ends.
+
+        Sends as visible alert if user has Charging Stopped Alerts enabled,
+        otherwise sends as silent background notification to end Live Activity.
+        """
+        return await self._send_evcc_charging_stopped_notification(
             notification_type="evcc_minsolar_charging_stopped",
             title="Min+Solar Charging Complete",
             body=f"Charged to {final_soc}% (+{charged_kwh:.1f} kWh)",
             data={
                 "final_soc": final_soc,
                 "charged_energy": charged_kwh,
-            },
-            silent=True
+            }
         )
 
     async def send_evcc_battery_boost_activated(
@@ -737,6 +770,104 @@ class APNsService:
 
         if success_count > 0:
             logger.info(f"EVCC notification ({notification_type}): {success_count} sent")
+
+        return success_count
+
+    async def _send_evcc_charging_stopped_notification(
+        self,
+        notification_type: str,
+        title: str,
+        body: str,
+        data: dict
+    ) -> int:
+        """Send charging stopped notification with per-device alert preference.
+
+        For each device:
+        - If evcc_charging_stopped_notifications is ON: Send visible alert
+        - Else if evcc_live_activities is ON: Send silent (to end Live Activity)
+        - Else: Skip notification
+
+        Args:
+            notification_type: Type identifier (evcc_*_charging_stopped)
+            title: Alert title for visible notifications
+            body: Alert body for visible notifications
+            data: Custom data payload
+
+        Returns:
+            Number of notifications sent successfully
+        """
+        if not self._initialized or not self.client:
+            logger.debug("APNs not initialized, skipping charging stopped notification")
+            return 0
+
+        if not self.devices:
+            logger.debug("No device tokens registered, skipping charging stopped notification")
+            return 0
+
+        success_count = 0
+        failed_tokens = []
+
+        for device_info in self.devices.values():
+            # Check if user wants this notification at all
+            if not self._should_send_notification(device_info, notification_type):
+                continue
+
+            # Determine if notification should be visible alert or silent
+            wants_alert = self._wants_charging_stopped_alert(device_info)
+            silent = not wants_alert
+
+            try:
+                # Build APS payload
+                aps: dict = {"content-available": 1}
+                if not silent:
+                    aps["alert"] = {"title": title, "body": body}
+                    aps["sound"] = "default"
+
+                message = {
+                    "aps": aps,
+                    "type": notification_type,
+                    **data
+                }
+
+                push_type = PushType.BACKGROUND if silent else PushType.ALERT
+
+                logger.info(f"📤 Sending {notification_type} notification:")
+                logger.info(f"   Push Type: {push_type}, Alert: {wants_alert}")
+                logger.info(f"   Payload: {message}")
+
+                request = NotificationRequest(
+                    device_token=device_info.token,
+                    message=message,
+                    push_type=push_type,
+                )
+                response = await self.client.send_notification(request)
+
+                logger.info(f"   APNs Response: is_successful={response.is_successful}, description={response.description}")
+
+                if response.is_successful:
+                    success_count += 1
+                    logger.debug(
+                        f"Charging stopped notification sent to {device_info.token[:20]}... "
+                        f"(alert={wants_alert})"
+                    )
+                else:
+                    logger.warning(
+                        f"Failed charging stopped notification to {device_info.token[:20]}...: "
+                        f"{response.description}"
+                    )
+                    if response.description in ("BadDeviceToken", "Unregistered"):
+                        failed_tokens.append(device_info.token)
+
+            except Exception as e:
+                logger.error(f"Error sending charging stopped notification ({notification_type}): {e}")
+
+        # Clean up invalid tokens
+        for token in failed_tokens:
+            if token in self.devices:
+                del self.devices[token]
+
+        if success_count > 0:
+            logger.info(f"Charging stopped notification ({notification_type}): {success_count} sent")
 
         return success_count
 
