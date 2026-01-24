@@ -384,7 +384,8 @@ class EVCCMonitorService:
                     departure_time=meta.get("plan_time", ""),
                     target_soc=meta.get("plan_soc", 100),
                     charging_power=meta.get("charge_power", 0),
-                    mode=meta.get("mode", "now")
+                    mode=meta.get("mode", "now"),
+                    current_soc=meta.get("vehicle_soc")  # Include current SOC for Live Activity
                 )
 
             elif change.change_type == "plan_complete":

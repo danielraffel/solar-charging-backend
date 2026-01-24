@@ -419,9 +419,19 @@ class APNsService:
         departure_time: str,
         target_soc: int,
         charging_power: float,
-        mode: str
+        mode: str,
+        current_soc: Optional[int] = None
     ) -> int:
-        """Send silent background notification to update Live Activity for plan charging."""
+        """Send silent background notification to update Live Activity for plan charging.
+
+        Args:
+            plan_number: The plan number (1 for one-time, 2+ for recurring)
+            departure_time: When the vehicle should be ready
+            target_soc: Target state of charge
+            charging_power: Current charging power in watts
+            mode: EVCC charging mode (pv, now, minpv)
+            current_soc: Current vehicle SOC - IMPORTANT for Live Activity update
+        """
         # Defensive: ensure target_soc is never None (use 100% as fallback)
         if target_soc is None:
             logger.warning("target_soc is None in send_evcc_plan_charging_started, using 100% fallback")
@@ -437,6 +447,7 @@ class APNsService:
                 "target_soc": target_soc,
                 "charging_power": int(charging_power),
                 "mode": mode,
+                "current_soc": current_soc,  # Include current SOC for Live Activity
             },
             silent=True  # Silent - updates Live Activity without visible banner
         )
