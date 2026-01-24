@@ -16,7 +16,7 @@ import yaml
 from .models import AppConfig, ScheduleData
 from .mqtt import MQTTClient
 from .scheduler import ChargingScheduleManager
-from .api import health_router, charge_router, device_router, debug_router
+from .api import health_router, charge_router, device_router
 from .notifications import APNsService
 from .evcc import EVCCMonitorService
 
@@ -188,7 +188,6 @@ app.add_middleware(
 app.include_router(health_router, prefix="/api", tags=["health"])
 app.include_router(charge_router, prefix="/api", tags=["charging"])
 app.include_router(device_router, prefix="/api", tags=["device"])
-app.include_router(debug_router, prefix="/api", tags=["debug"])
 
 
 @app.get("/")
@@ -230,8 +229,6 @@ async def root():
     }
 
 
-
-
 @app.get("/admin", response_class=HTMLResponse)
 async def admin_page():
     """Status dashboard for monitoring charging."""
@@ -239,3 +236,23 @@ async def admin_page():
     if html_path.exists():
         return html_path.read_text()
     return "<html><body><h1>Admin page not found</h1></body></html>"
+
+
+if __name__ == "__main__":
+    import uvicorn
+    import os
+
+    # Load config to get port (fallback entry point)
+    config_path = Path("config.yaml")
+    if config_path.exists():
+        with open(config_path) as f:
+            config_data = yaml.safe_load(f)
+        config = AppConfig(**config_data)
+        port = int(os.getenv("SERVER_PORT", config.server.port))
+        host = os.getenv("SERVER_HOST", config.server.host)
+    else:
+        port = int(os.getenv("SERVER_PORT", 8088))
+        host = os.getenv("SERVER_HOST", "0.0.0.0")
+        print("WARNING: config.yaml not found, using defaults")
+
+    uvicorn.run("app.main:app", host=host, port=port, log_level="info")

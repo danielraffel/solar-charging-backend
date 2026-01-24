@@ -222,7 +222,11 @@ async def enable_charging(request: EnableChargingRequest) -> EnableChargingRespo
         app_state.scheduler.is_charging = True
         app_state.scheduler.charge_started_at = now
 
+        # Start SOC monitoring - will auto-stop when target reached
+        app_state.scheduler.start_soc_monitoring(schedule)
+
         logger.info(f"✅ AC charging enabled: target={request.target_soc}%, time={start_time}-{end_time}")
+        logger.info(f"   SOC monitoring active - will stop at {request.target_soc}%")
 
         return EnableChargingResponse(
             success=True,
@@ -322,3 +326,24 @@ async def get_charging_status() -> ChargingStatusResponse:
         # MQTT status
         mqtt_connected=mqtt.connected
     )
+
+
+@router.get("/inverter/status")
+async def get_inverter_status():
+    """Get inverter's current AC charging configuration from MQTT holdbank data.
+
+    Returns the actual settings on the inverter:
+    - AC charging enabled/disabled
+    - Charging mode (Time, SOC, Time+SOC, etc.)
+    - SOC limit
+    - Time windows
+
+    This is useful for seeing what's actually configured on the inverter,
+    independent of what the backend has scheduled.
+    """
+    from ..main import app_state
+
+    if not app_state.mqtt:
+        return {"error": "MQTT not connected", "data_available": False}
+
+    return app_state.mqtt.get_inverter_status()

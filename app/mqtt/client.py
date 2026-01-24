@@ -48,6 +48,17 @@ class MQTTClient:
         self._last_response: Optional[Dict[str, Any]] = None
         self._pending_setting: Optional[str] = None  # Track which setting we're waiting for
 
+        # Inverter AC charging settings (from holdbank)
+        self.inverter_ac_charge_enabled: Optional[bool] = None  # ACCharge (0/1)
+        self.inverter_ac_charge_mode: Optional[int] = None  # ACChgMode (0-4)
+        self.inverter_ac_charge_soc_limit: Optional[int] = None  # ACChgSOCLimit
+        self.inverter_ac_charge_start: Optional[str] = None  # ACChgStart (HH:MM)
+        self.inverter_ac_charge_end: Optional[str] = None  # ACChgEnd (HH:MM)
+        self.inverter_ac_charge_start1: Optional[str] = None  # ACChgStart1
+        self.inverter_ac_charge_end1: Optional[str] = None  # ACChgEnd1
+        self.inverter_ac_charge_start2: Optional[str] = None  # ACChgStart2
+        self.inverter_ac_charge_end2: Optional[str] = None  # ACChgEnd2
+
     def connect(self, timeout: int = 10, retries: int = 3) -> bool:
         """
         Connect to MQTT broker with retry logic.
@@ -124,6 +135,16 @@ class MQTTClient:
             client.subscribe(inputbank_topic)
             logger.info(f"Subscribed to {inputbank_topic}")
 
+            # Subscribe to holdbank1 for AC charging settings
+            holdbank1_topic = f"{self.config.dongle_prefix}/holdbank1"
+            client.subscribe(holdbank1_topic)
+            logger.info(f"Subscribed to {holdbank1_topic}")
+
+            # Subscribe to holdbank2 for additional settings (SOC limits, time windows)
+            holdbank2_topic = f"{self.config.dongle_prefix}/holdbank2"
+            client.subscribe(holdbank2_topic)
+            logger.info(f"Subscribed to {holdbank2_topic}")
+
             # Subscribe to response topic for command confirmations
             response_topic = f"{self.config.dongle_prefix}/response"
             client.subscribe(response_topic)
@@ -172,6 +193,51 @@ class MQTTClient:
                         self.battery_power = 0
 
                     logger.debug(f"Battery power: {self.battery_power}W")
+
+            # Parse holdbank1 for AC charging enabled state
+            elif topic.endswith("/holdbank1"):
+                payload = json.loads(msg.payload.decode())
+
+                if "Serialnumber" in payload and "payload" in payload:
+                    data = payload["payload"]
+
+                    # ACCharge: 0=disabled, 1=enabled
+                    if "ACCharge" in data:
+                        self.inverter_ac_charge_enabled = int(data["ACCharge"]) == 1
+                        logger.debug(f"Inverter AC Charge: {'enabled' if self.inverter_ac_charge_enabled else 'disabled'}")
+
+            # Parse holdbank2 for AC charging settings (mode, SOC limit, time windows)
+            elif topic.endswith("/holdbank2"):
+                payload = json.loads(msg.payload.decode())
+
+                if "Serialnumber" in payload and "payload" in payload:
+                    data = payload["payload"]
+
+                    # ACChgMode: 0=Time, 1=VOLT, 2=SOC, 3=Time+VOLT, 4=Time+SOC
+                    if "ACChgMode" in data:
+                        self.inverter_ac_charge_mode = int(data["ACChgMode"])
+                        logger.debug(f"Inverter AC Charge Mode: {self.inverter_ac_charge_mode}")
+
+                    # ACChgSOCLimit: Target SOC percentage
+                    if "ACChgSOCLimit" in data:
+                        self.inverter_ac_charge_soc_limit = int(data["ACChgSOCLimit"])
+                        logger.debug(f"Inverter AC Charge SOC Limit: {self.inverter_ac_charge_soc_limit}%")
+
+                    # Time windows (HH:MM format)
+                    if "ACChgStart" in data:
+                        self.inverter_ac_charge_start = str(data["ACChgStart"])
+                    if "ACChgEnd" in data:
+                        self.inverter_ac_charge_end = str(data["ACChgEnd"])
+                    if "ACChgStart1" in data:
+                        self.inverter_ac_charge_start1 = str(data["ACChgStart1"])
+                    if "ACChgEnd1" in data:
+                        self.inverter_ac_charge_end1 = str(data["ACChgEnd1"])
+                    if "ACChgStart2" in data:
+                        self.inverter_ac_charge_start2 = str(data["ACChgStart2"])
+                    if "ACChgEnd2" in data:
+                        self.inverter_ac_charge_end2 = str(data["ACChgEnd2"])
+
+                    logger.debug(f"Inverter time windows: {self.inverter_ac_charge_start}-{self.inverter_ac_charge_end}")
 
             # Parse response topic for command confirmations
             elif topic.endswith("/response"):
@@ -329,6 +395,57 @@ class MQTTClient:
     def set_soc_callback(self, callback: Callable[[int], None]):
         """Set callback function to be called when SOC is updated."""
         self.soc_callback = callback
+
+    def get_inverter_status(self) -> Dict[str, Any]:
+        """Get current inverter AC charging status from MQTT holdbank data.
+
+        Returns a dictionary with:
+        - ac_charge_enabled: Whether AC charging is enabled on inverter
+        - ac_charge_mode: Charging mode (0-4)
+        - ac_charge_mode_name: Human-readable mode name
+        - ac_charge_soc_limit: Target SOC percentage
+        - time_windows: List of configured time windows
+        """
+        mode_names = {
+            0: "Time only",
+            1: "VOLT only",
+            2: "SOC only",
+            3: "Time + VOLT",
+            4: "Time + SOC"
+        }
+
+        # Build time windows list (only include non-empty windows)
+        time_windows = []
+        if self.inverter_ac_charge_start and self.inverter_ac_charge_end:
+            if self.inverter_ac_charge_start != "00:00" or self.inverter_ac_charge_end != "00:00":
+                time_windows.append({
+                    "window": 1,
+                    "start": self.inverter_ac_charge_start,
+                    "end": self.inverter_ac_charge_end
+                })
+        if self.inverter_ac_charge_start1 and self.inverter_ac_charge_end1:
+            if self.inverter_ac_charge_start1 != "00:00" or self.inverter_ac_charge_end1 != "00:00":
+                time_windows.append({
+                    "window": 2,
+                    "start": self.inverter_ac_charge_start1,
+                    "end": self.inverter_ac_charge_end1
+                })
+        if self.inverter_ac_charge_start2 and self.inverter_ac_charge_end2:
+            if self.inverter_ac_charge_start2 != "00:00" or self.inverter_ac_charge_end2 != "00:00":
+                time_windows.append({
+                    "window": 3,
+                    "start": self.inverter_ac_charge_start2,
+                    "end": self.inverter_ac_charge_end2
+                })
+
+        return {
+            "ac_charge_enabled": self.inverter_ac_charge_enabled,
+            "ac_charge_mode": self.inverter_ac_charge_mode,
+            "ac_charge_mode_name": mode_names.get(self.inverter_ac_charge_mode, "Unknown") if self.inverter_ac_charge_mode is not None else None,
+            "ac_charge_soc_limit": self.inverter_ac_charge_soc_limit,
+            "time_windows": time_windows,
+            "data_available": self.inverter_ac_charge_enabled is not None  # True if we've received holdbank data
+        }
 
     def publish_ac_charge_mode(self, mode: int = 4) -> bool:
         """Publish ACChgMode setting with response confirmation.
